@@ -15,5 +15,3 @@ After installation, you can delete the directory cloned with git and use hehfetc
 ```bash
 hehfetch
 ```
-
-If your favorite distro is not in hehfetch, write to me in discord and I will add it: @hehhzqq
