@@ -1,3 +1,5 @@
 make
 cp hehfetch /bin/hehfetch
 chmod +x /bin/hehfetch
+cd ..
+rm -rf hehfetch/
