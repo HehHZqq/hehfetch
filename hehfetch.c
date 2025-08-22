@@ -158,16 +158,33 @@ void get_package_count(char *count) {
     char line[MAX_LINE_LENGTH];
     int packages = 0;
 
-    fp = popen("pacman -Qq | wc -l", "r");
-    if (fp && fgets(line, sizeof(line), fp)) { packages = atoi(line); pclose(fp); sprintf(count, "%d", packages); return; }
-    if (fp) pclose(fp);
+    const char *cmds[] = {
+        "pacman -Qq 2>/dev/null | wc -l",                
+        "dpkg-query -f '${binary:Package}\\n' -W 2>/dev/null | wc -l", 
+        "rpm -qa 2>/dev/null | wc -l",                  
+        "xbps-query -l 2>/dev/null | wc -l",            
+        "equery list '*' 2>/dev/null | wc -l",          
+        NULL
+    };
 
-    fp = popen("dpkg-query -f '${binary:Package}\n' -W | wc -l", "r");
-    if (fp && fgets(line, sizeof(line), fp)) { packages = atoi(line); pclose(fp); sprintf(count, "%d", packages); return; }
-    if (fp) pclose(fp);
+    for (int i = 0; cmds[i]; i++) {
+        fp = popen(cmds[i], "r");
+        if (!fp) continue;
+
+        if (fgets(line, sizeof(line), fp)) {
+            packages = atoi(line);
+        }
+        pclose(fp);
+
+        if (packages > 0) {
+            sprintf(count, "%d", packages);
+            return;
+        }
+    }
 
     strcpy(count, "Unknown");
 }
+
 
 void get_memory_usage(char *memory) {
     struct sysinfo si;
@@ -193,18 +210,57 @@ void get_wm(char *wm) {
     FILE *fp;
     char line[256];
 
+    // 1. Попробовать wmctrl
     fp = popen("wmctrl -m 2>/dev/null | grep 'Name:' | awk -F': ' '{print $2}'", "r");
     if (fp) {
-        if (fgets(line, sizeof(line), fp)) { line[strcspn(line, "\n")] = 0; if (strlen(line) > 0) { strcpy(wm, line); pclose(fp); return; } }
+        if (fgets(line, sizeof(line), fp)) {
+            line[strcspn(line, "\n")] = 0;
+            if (strlen(line) > 0) {
+                strcpy(wm, line);
+                pclose(fp);
+                return;
+            }
+        }
         pclose(fp);
     }
 
-    char *wm_name = getenv("XDG_CURRENT_DESKTOP");
-    if (!wm_name) wm_name = getenv("DESKTOP_SESSION");
-    if (wm_name && strlen(wm_name) > 0) { strcpy(wm, wm_name); return; }
+    // 2. Попробовать через xprop (X11)
+    fp = popen("xprop -root _NET_SUPPORTING_WM_CHECK 2>/dev/null | awk '{print $5}'", "r");
+    if (fp) {
+        if (fgets(line, sizeof(line), fp)) {
+            char cmd[256];
+            snprintf(cmd, sizeof(cmd), "xprop -id %s _NET_WM_NAME 2>/dev/null | cut -d '\"' -f 2", line);
+            pclose(fp);
 
+            fp = popen(cmd, "r");
+            if (fp && fgets(line, sizeof(line), fp)) {
+                line[strcspn(line, "\n")] = 0;
+                if (strlen(line) > 0) {
+                    strcpy(wm, line);
+                    pclose(fp);
+                    return;
+                }
+            }
+            if (fp) pclose(fp);
+        } else {
+            pclose(fp);
+        }
+    }
+
+    // 3. Переменные окружения (Wayland и fallback)
+    char *wm_name = getenv("XDG_CURRENT_DESKTOP");
+    if (!wm_name) wm_name = getenv("XDG_SESSION_DESKTOP");
+    if (!wm_name) wm_name = getenv("DESKTOP_SESSION");
+
+    if (wm_name && strlen(wm_name) > 0) {
+        strcpy(wm, wm_name);
+        return;
+    }
+
+    // 4. Фоллбэк для Void (dwm)
     strcpy(wm, "dwm");
 }
+
 
 void get_prompt(char *prompt) {
     char hostname[MAX_LINE_LENGTH];
