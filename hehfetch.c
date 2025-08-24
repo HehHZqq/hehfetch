@@ -206,13 +206,40 @@ void get_shell(char *shell) {
     strcpy(shell, shell_name);
 }
 
+
+
 void get_wm(char *wm) {
     FILE *fp;
     char line[256];
 
-    // 1. Попробовать wmctrl
-    fp = popen("wmctrl -m 2>/dev/null | grep 'Name:' | awk -F': ' '{print $2}'", "r");
-    if (fp) {
+    char *wayland_display = getenv("WAYLAND_DISPLAY");
+    char *xdg_session_type = getenv("XDG_SESSION_TYPE");
+    
+    if ((wayland_display != NULL && strlen(wayland_display) > 0) || 
+        (xdg_session_type != NULL && strstr(xdg_session_type, "wayland"))) {
+        
+        // Проверка специфичных для Hyprland переменных
+        char *hyprland_instance = getenv("HYPRLAND_INSTANCE_SIGNATURE");
+        if (hyprland_instance != NULL) {
+            strcpy(wm, "Hyprland");
+            return;
+        }
+        
+        char *xdg_current_desktop = getenv("XDG_CURRENT_DESKTOP");
+        if (xdg_current_desktop != NULL && strlen(xdg_current_desktop) > 0) {
+            strcpy(wm, xdg_current_desktop);
+            return;
+        }
+        
+        char *xdg_session_desktop = getenv("XDG_SESSION_DESKTOP");
+        if (xdg_session_desktop != NULL && strlen(xdg_session_desktop) > 0) {
+            strcpy(wm, xdg_session_desktop);
+            return;
+        }
+    }
+
+    fp = popen("ps -e | grep -E \"(hyprland|sway|river|wayfire|weston)\" | grep -v grep | head -1 | awk '{print $4}'", "r");
+    if (fp != NULL) {
         if (fgets(line, sizeof(line), fp)) {
             line[strcspn(line, "\n")] = 0;
             if (strlen(line) > 0) {
@@ -224,42 +251,68 @@ void get_wm(char *wm) {
         pclose(fp);
     }
 
-    // 2. Попробовать через xprop (X11)
-    fp = popen("xprop -root _NET_SUPPORTING_WM_CHECK 2>/dev/null | awk '{print $5}'", "r");
-    if (fp) {
+    fp = popen("wmctrl -m 2>/dev/null | grep 'Name:' | awk -F': ' '{print $2}'", "r");
+    if (fp != NULL) {
         if (fgets(line, sizeof(line), fp)) {
-            char cmd[256];
-            snprintf(cmd, sizeof(cmd), "xprop -id %s _NET_WM_NAME 2>/dev/null | cut -d '\"' -f 2", line);
-            pclose(fp);
-
-            fp = popen(cmd, "r");
-            if (fp && fgets(line, sizeof(line), fp)) {
-                line[strcspn(line, "\n")] = 0;
-                if (strlen(line) > 0) {
-                    strcpy(wm, line);
-                    pclose(fp);
-                    return;
-                }
+            line[strcspn(line, "\n")] = 0;
+            if (strlen(line) > 0) {
+                strcpy(wm, line);
+                pclose(fp);
+                return;
             }
-            if (fp) pclose(fp);
-        } else {
-            pclose(fp);
         }
+        pclose(fp);
     }
 
-    // 3. Переменные окружения (Wayland и fallback)
-    char *wm_name = getenv("XDG_CURRENT_DESKTOP");
-    if (!wm_name) wm_name = getenv("XDG_SESSION_DESKTOP");
-    if (!wm_name) wm_name = getenv("DESKTOP_SESSION");
+    fp = popen("xprop -root _NET_SUPPORTING_WM_CHECK 2>/dev/null", "r");
+    if (fp != NULL) {
+        if (fgets(line, sizeof(line), fp)) {
+            if (strstr(line, "window id # 0x")) {
+                strcpy(wm, "XWayland (Wayland session)");
+                pclose(fp);
+                return;
+            }
+            
+            char window_id[256];
+            if (sscanf(line, "_NET_SUPPORTING_WM_CHECK(WINDOW): window id # %s", window_id) == 1) {
+                char cmd[512];
+                snprintf(cmd, sizeof(cmd), "xprop -id %s _NET_WM_NAME 2>/dev/null | cut -d '\"' -f 2", window_id);
+                pclose(fp);
+                
+                fp = popen(cmd, "r");
+                if (fp != NULL && fgets(line, sizeof(line), fp)) {
+                    line[strcspn(line, "\n")] = 0;
+                    if (strlen(line) > 0) {
+                        strcpy(wm, line);
+                        pclose(fp);
+                        return;
+                    }
+                }
+                if (fp != NULL) pclose(fp);
+            }
+        }
+        pclose(fp);
+    }
 
-    if (wm_name && strlen(wm_name) > 0) {
-        strcpy(wm, wm_name);
+    char *wm_env = getenv("XDG_CURRENT_DESKTOP");
+    if (wm_env == NULL || strlen(wm_env) == 0) {
+        wm_env = getenv("XDG_SESSION_DESKTOP");
+    }
+    if (wm_env == NULL || strlen(wm_env) == 0) {
+        wm_env = getenv("DESKTOP_SESSION");
+    }
+    
+    if (wm_env != NULL && strlen(wm_env) > 0) {
+        strcpy(wm, wm_env);
         return;
     }
 
-    // 4. Фоллбэк для Void (dwm)
-    strcpy(wm, "dwm");
+    strcpy(wm, "Unknown");
 }
+
+
+
+
 
 
 void get_prompt(char *prompt) {
